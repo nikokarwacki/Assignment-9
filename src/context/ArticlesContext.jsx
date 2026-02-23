@@ -1,48 +1,65 @@
-import React, { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useMemo, useState } from "react"
+import { useAuth } from "./AuthContext"
 
-// ⚠️ SECURITY ISSUE: This context is shared globally with no user authentication
-// All users see the same saved articles!
-const ArticlesContext = createContext();
+const ArticlesContext = createContext(null)
 
 export function ArticlesProvider({ children }) {
-  const [savedArticles, setSavedArticles] = useState([]);
+  const { user, isAuthenticated } = useAuth()
 
-  const saveArticle = (article) => {
-    setSavedArticles(prev => {
-      // Check if article is already saved
-      if (prev.find(a => a.url === article.url)) {
-        return prev;
-      }
-      return [...prev, article];
-    });
-  };
+  // { username: [articles...] }
+  const [savedArticlesByUser, setSavedArticlesByUser] = useState({})
 
-  const removeArticle = (url) => {
-    setSavedArticles(prev => prev.filter(a => a.url !== url));
-  };
-
-  const isArticleSaved = (url) => {
-    return savedArticles.some(a => a.url === url);
-  };
-
-  return (
-    <ArticlesContext.Provider 
-      value={{ 
-        savedArticles, 
-        saveArticle, 
-        removeArticle, 
-        isArticleSaved 
-      }}
-    >
-      {children}
-    </ArticlesContext.Provider>
-  );
-};
-
-export const useArticles = () => {
-  const context = useContext(ArticlesContext);
-  if (!context) {
-    throw new Error('useArticles must be used within ArticlesProvider');
+  function getUserSavedArticles() {
+    if (!isAuthenticated || !user) return []
+    return savedArticlesByUser[user.username] || []
   }
-  return context;
-};
+
+  function isArticleSaved(article) {
+    if (!isAuthenticated || !user) return false
+    const list = savedArticlesByUser[user.username] || []
+    return list.some(a => a?.uri === article?.uri)
+  }
+
+  function saveArticle(article) {
+    if (!isAuthenticated || !user) return
+    setSavedArticlesByUser(prev => {
+      const list = prev[user.username] || []
+      if (list.some(a => a?.uri === article?.uri)) return prev
+      return { ...prev, [user.username]: [...list, article] }
+    })
+  }
+
+  function removeArticle(article) {
+    if (!isAuthenticated || !user) return
+    setSavedArticlesByUser(prev => {
+      const list = prev[user.username] || []
+      return {
+        ...prev,
+        [user.username]: list.filter(a => a?.uri !== article?.uri),
+      }
+    })
+  }
+
+  function getAllUserArticles() {
+    return savedArticlesByUser
+  }
+
+  const value = useMemo(
+    () => ({
+      saveArticle,
+      removeArticle,
+      isArticleSaved,
+      getUserSavedArticles,
+      getAllUserArticles,
+    }),
+    [savedArticlesByUser, user, isAuthenticated]
+  )
+
+  return <ArticlesContext.Provider value={value}>{children}</ArticlesContext.Provider>
+}
+
+export function useArticles() {
+  const ctx = useContext(ArticlesContext)
+  if (!ctx) throw new Error("useArticles must be used inside ArticlesProvider")
+  return ctx
+}
